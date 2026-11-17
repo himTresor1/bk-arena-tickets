@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Kigali sports complex · Explore</title>
+  <link rel="stylesheet" href="/src/glass.css">
+  <link rel="stylesheet" href="/src/tour.css">
+</head>
+<body data-mode="loading" data-menu="1">
+  <div id="loader">
+    <b>KIGALI SPORTS COMPLEX</b>
+    <div class="load-bar"><i id="load-fill"></i></div>
+    <p>Building the neighbourhood <span id="load-pct">0%</span></p>
+  </div>
+  <script>
+    window.__loading = function (f) {
+      var pct = Math.round(Math.min(1, f) * 100);
+      document.getElementById('load-fill').style.width = pct + '%'; document.getElementById('load-pct').textContent = pct + '%';
+      if (f >= 1) { var el = document.getElementById('loader'); el.classList.add('done'); setTimeout(function () { el.remove(); }, 600); }
+    };
+  </script>
+  <canvas id="c"></canvas>
+
+  <!-- title screen: the two ways in -->
+  <section id="menu">
+    <div class="menu-card glass">
+      <div class="menu-top"><nav class="switch"><a class="on" href="/tour">Explore</a><a href="/">Tickets</a></nav><small>Remera, Kigali</small></div>
+      <h1>Kigali Sports Complex</h1>
+      <p class="lead">Fly over the arena, the stadium and Zaria Court. Land anywhere and walk.</p>
+      <div class="goals"><div><b>5</b><span>places</span></div><div><b>15</b><span>gold coins</span></div><div><b>2</b><span>sticks to steer</span></div></div>
+      <div class="menu-row">
+        <button id="start" class="btn primary"><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>Start exploring</button>
+      </div>
+      <p class="fine">Left stick moves, right stick looks. Keyboard and controllers work too.</p>
+    </div>
+  </section>
+
+  <header class="bar glass">
+    <div class="brand">
+      <span class="flag"><i></i><i></i><i></i></span>
+      <div><b>Kigali Sports Complex</b><small>Remera, Kigali</small></div>
+    </div>
+    <nav class="switch"><a class="on" href="/tour">Explore</a><a href="/">Tickets</a></nav>
+  </header>
+
+  <div id="stats" class="glass">
+    <span title="Places discovered"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 00-7-7zm0 9.5A2.5 2.5 0 1112 6.5a2.5 2.5 0 010 5z"/></svg><b id="n-places">0</b>/5</span>
+    <span title="Coins found"><i class="coin"></i><b id="n-coins">0</b>/15</span>
+  </div>
+  <canvas id="map" class="glass" width="264" height="264"></canvas>
+
+  <div id="tags"></div>
+  <aside id="card" class="glass" hidden></aside>
+  <nav id="places" class="glass" hidden></nav>
+  <button id="prompt" class="glass" hidden></button>
+  <div id="toast" class="glass" hidden></div>
+  <p id="hint" class="glass"></p>
+
+  <!-- game controls -->
+  <div id="padL" class="stick glass" aria-label="Move">
+    <svg class="ch u" viewBox="0 0 24 24"><path d="M5 15l7-7 7 7"/></svg><svg class="ch r" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg>
+    <svg class="ch d" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></svg><svg class="ch l" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    <b></b>
+  </div>
+  <div id="padR" class="stick glass" aria-label="Look">
+    <svg class="eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+    <b></b>
+  </div>
+  <div id="acts">
+    <button id="a-go" class="act glass" aria-label="Travel to a place"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 00-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 00-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg><small>Travel</small></button>
+    <button id="a-fly" class="act glass big" aria-label="Fly or land"><svg viewBox="0 0 24 24"><path id="fly-ico" d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><small id="fly-txt">Land</small></button>
+    <button id="a-run" class="act glass" aria-label="Run"><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg><small>Run</small></button>
+    <button id="a-zin" class="act glass" aria-label="Closer"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><small>Closer</small></button>
+    <button id="a-zout" class="act glass" aria-label="Further"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg><small>Further</small></button>
+  </div>
+
+  <script type="module" src="/src/tour.js"></script>
+</body>
+</html>

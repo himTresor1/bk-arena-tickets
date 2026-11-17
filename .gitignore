@@ -18,3 +18,7 @@ __pycache__/
 
 # the Blender file stores this machine's folder paths inside it; the scripts in blender/py rebuild it
 blender/*.blend
+
+# reference photos and map data for the sports complex (other people's photos: never publish)
+reference/
+config.bat

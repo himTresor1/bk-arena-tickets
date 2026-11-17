@@ -216,6 +216,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url.pathname === '/admin') req.url = '/admin.html';
+  if (url.pathname === '/tour') req.url = '/tour.html';
   vite.middlewares(req, res);
 });
 const vite = await createVite({ server: { middlewareMode: true, hmr: { server } }, appType: 'mpa' });
