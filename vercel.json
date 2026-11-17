@@ -2,8 +2,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
-  "rewrites": [{ "source": "/admin", "destination": "/admin.html" }],
+  "rewrites": [{ "source": "/admin", "destination": "/admin.html" }, { "source": "/tour", "destination": "/tour.html" }],
   "headers": [
-    { "source": "/(models|textures|draco)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] }
+    { "source": "/(models|textures|draco|tour)/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=604800" }] }
   ]
 }

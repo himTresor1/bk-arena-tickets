@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@500;700&display=swap" rel="stylesheet">
   <title>BK Arena · Choose your seat</title>
   <link rel="stylesheet" href="/src/style.css">
+  <link rel="stylesheet" href="/src/glass.css">
 </head>
 <body data-mode="loading">
   <div id="loader">
@@ -31,6 +32,7 @@
       <div><b>BK ARENA</b><small><span id="event-name"></span> · <span id="event-date"></span></small></div>
     </div>
     <div class="right">
+      <nav class="switch"><a href="/tour">Explore</a><a class="on" href="/">Tickets</a></nav>
       <ul class="legend">
         <li><i id="lg-free" style="background:#1f9d55"></i>Available</li>
         <li><i id="lg-pick" style="background:#fad201"></i>Your pick</li>
@@ -44,8 +46,8 @@
     <p class="kicker">Kigali · Rwanda</p>
     <h1>BK Arena</h1>
     <p id="hero-event"></p>
-    <button id="enter">Find your seat</button>
-    <p class="sub">Step inside, pick a section, sit down and see the view before you buy.</p>
+    <div class="ways"><button id="enter">Find your seat</button><a href="/tour">Explore the complex</a></div>
+    <p class="sub">Step inside, pick a section, sit down and see the view before you buy. Or fly over the whole sports complex and walk around it.</p>
   </section>
 
   <nav id="crumbs" hidden></nav>
