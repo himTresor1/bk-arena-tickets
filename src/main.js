@@ -47,10 +47,18 @@ const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 3000);
 // cars, trees and shrubs modelled in Blender (public/models/world.glb); the surroundings fall back to simple shapes without them
 const worldAssets = {};
 try {
-  const g = await new GLTFLoader().loadAsync('/models/world.glb?v=' + __BUILD__), geo = (n) => { const o = g.scene.getObjectByName(n); return o && o.geometry; };
-  worldAssets.cars = [1, 2, 3].map((n) => ({ body: geo(`Car${n}_Body`), glass: geo(`Car${n}_Glass`), trim: geo(`Car${n}_Trim`), lights: geo(`Car${n}_Lights`) })).filter((c) => c.body && c.glass);
-  worldAssets.trees = ['Tree1', 'Tree2', 'Tree3'].map(geo).filter(Boolean); worldAssets.bush = geo('Bush');
+  // every model comes twice in the file: full, and light (an L after the name). The car park and phones get the light ones.
+  const wl = new GLTFLoader(); wl.setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
+  const g = await wl.loadAsync('/models/world.glb?v=' + __BUILD__), geo = (n) => { const o = g.scene.getObjectByName(n); return o && o.geometry; };
+  const lite = matchMedia('(pointer: coarse)').matches, L = lite ? 'L' : '';
+  const carSet = (s) => [1, 2, 3].map((n) => ({ body: geo(`Car${n}${s}_Body`), glass: geo(`Car${n}${s}_Glass`), trim: geo(`Car${n}${s}_Trim`), lights: geo(`Car${n}${s}_Lights`), rim: geo(`Car${n}${s}_Rim`), tail: geo(`Car${n}${s}_Tail`) })).filter((c) => c.body && c.glass);
+  worldAssets.cars = carSet('L'); worldAssets.carsNear = carSet(L);
+  worldAssets.trees = ['Tree1', 'Tree2', 'Tree3'].map((n) => geo(n + L)).filter(Boolean); worldAssets.bush = geo('Bush' + L);
   if (!worldAssets.trees.length) delete worldAssets.trees;
+  else { // the leaves are painted sprigs on small cards: public/textures/tour/leaves.webp (made by blender/py/100_world_models.py)
+    const t = await new THREE.TextureLoader().loadAsync('/textures/tour/leaves.webp?v=' + __BUILD__);
+    t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; worldAssets.leafTex = t;
+  }
 } catch (err) { console.warn('Blender cars and trees not loaded, using simple shapes:', err.message); }
 tick();
 const arena = buildArena(scene, worldAssets);

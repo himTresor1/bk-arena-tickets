@@ -16,19 +16,22 @@ export function reflect(mat, strength) { if (ENV && strength > 0) { mat.envMap =
 // `onProgress(fraction)` is called as files arrive, for the loading screen. The court is not loaded here: only the
 // paint scheme in use is fetched, by loadSet().
 const loader = new THREE.TextureLoader();
+let ANISO = 8;
+export const setAnisotropy = (n) => { ANISO = n; };
 async function fetchAll(files, onProgress) {
   let done = 0;
   await Promise.all(files.map(async (f) => {
     if (!cache.has(f)) {
-      try { const t = await loader.loadAsync('/textures/' + f + '?v=' + __BUILD__); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; cache.set(f, t); }
+      try { const t = await loader.loadAsync('/textures/' + f + '?v=' + __BUILD__); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = ANISO; cache.set(f, t); }
       catch { console.warn('texture missing:', f); }
     }
     if (onProgress) onProgress(++done / files.length);
   }));
 }
-export async function preload(onProgress) {
-  const files = ['sky.jpg', 'lattice_color.jpg', 'parking_color.jpg', 'parking_rough.jpg', 'road_color.jpg', 'road_normal.jpg', 'road_rough.jpg'];
-  for (const name of Object.keys(TILE)) { files.push(`${name}_color.jpg`); if (!FLAT.has(name)) files.push(`${name}_normal.jpg`, `${name}_rough.jpg`); }
+// A page may ask for just the surfaces it uses (`names`), leave out relief and shine maps (`relief: false`), and name its own extra files (`only`).
+export async function preload(onProgress, { names = Object.keys(TILE), relief = true, only = null } = {}) {
+  const files = only ? [...only] : ['sky.jpg', 'lattice_color.jpg', 'parking_color.jpg', 'parking_rough.jpg', 'road_color.jpg', 'road_normal.jpg', 'road_rough.jpg'];
+  for (const name of names) { files.push(`${name}_color.jpg`); if (relief && !FLAT.has(name)) files.push(`${name}_normal.jpg`, `${name}_rough.jpg`); }
   await fetchAll(files, onProgress);
 }
 const sets = new Map();

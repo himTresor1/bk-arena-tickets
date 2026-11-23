@@ -324,10 +324,12 @@ function surroundings(scene, assets = {}) {
   const paint = [0xf2f2f2, 0xd9d9d6, 0x1b1b1d, 0x8b8f96, 0x8f1a1a, 0x1d3f7a, 0xc9c2b2, 0x2b2d31, 0x5d6b73, 0x7a1f2b];
   const paintMat = reflect(new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.55 }), 0.8), glassMat = reflect(new THREE.MeshStandardMaterial({ color: 0x141c20, roughness: 0.06, metalness: 0.7 }), 1.2);
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.7 }), lightMat = new THREE.MeshBasicMaterial({ color: 0xf6f3e6 });
+  const rimMat = reflect(new THREE.MeshStandardMaterial({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.9 }), 0.8), tailMat = new THREE.MeshStandardMaterial({ color: 0x8f0f12, roughness: 0.4, emissive: 0x5a0507 });
   const MODELS = assets.cars && assets.cars.length ? assets.cars : [{ body: new THREE.BoxGeometry(1.85, 0.75, 4.3).translate(0, 0.62, 0), glass: new THREE.BoxGeometry(1.6, 0.55, 2.2).translate(0, 1.26, -0.2) }];
-  const fleet = (count) => MODELS.map((g) => {
+  const fleet = (count, models = MODELS) => models.map((g) => {
     const parts = [new THREE.InstancedMesh(g.body, paintMat, count), new THREE.InstancedMesh(g.glass, glassMat, count)];
     if (g.trim) parts.push(new THREE.InstancedMesh(g.trim, trimMat, count)); if (g.lights) parts.push(new THREE.InstancedMesh(g.lights, lightMat, count));
+    if (g.rim) parts.push(new THREE.InstancedMesh(g.rim, rimMat, count)); if (g.tail) parts.push(new THREE.InstancedMesh(g.tail, tailMat, count));
     parts.forEach((p) => { p.count = 0; scene.add(p); }); return { parts, n: 0 };
   });
   const place = (set, i, x, z, ry) => { o.position.set(x, -0.1, z); o.rotation.set(0, ry, 0); o.scale.setScalar(1); o.updateMatrix(); set.parts.forEach((p) => p.setMatrixAt(i, o.matrix)); };
@@ -336,7 +338,7 @@ function surroundings(scene, assets = {}) {
   bayArcs.forEach(([a0, a1]) => { const stepA = (2.75 / (RX + 79.5)) / deg; for (let a = a0 + stepA / 2; a < a1; a += stepA) if (rnd() < 0.68) { const c = Math.cos(a * deg), s = Math.sin(a * deg); park(c * (RX + 79.6), s * (RZ + 79.6), Math.atan2(-c, -s)); } });
   LOTS.forEach((L, li) => { for (let row = -L.d / 2 + 8; row < L.d / 2; row += 16) for (let x = -L.w / 2 + 2.75 / 2 + (((L.w / 2) % 2.75)); x < L.w / 2 - 1; x += 2.75) for (const side of [-1, 1]) if (rnd() < (li === 0 ? 0.7 : 0.5)) park(L.x + Math.round((x - 1.375) / 2.75) * 2.75 + 1.375, L.z + row + side * 2.75, side > 0 ? Math.PI : 0); });
   parked.forEach((set) => set.parts.forEach((p) => { p.count = set.n; p.instanceMatrix.needsUpdate = true; if (p.instanceColor) p.instanceColor.needsUpdate = true; }));
-  const MOV = 8, moving = fleet(MOV), drivers = [];
+  const MOV = 8, moving = fleet(MOV, assets.carsNear && assets.carsNear.length ? assets.carsNear : MODELS), drivers = [];
   moving.forEach((set, mi) => { for (let i = 0; i < MOV; i++) { const inner = (i + mi) % 2 === 0; drivers.push({ set, i, a: rnd() * Math.PI * 2, lane: inner ? 68.6 : 73.4, speed: (inner ? 1 : -1) * (7 + rnd() * 5) }); set.parts[0].setColorAt(i, col.setHex(paint[Math.floor(rnd() * paint.length)])); }
     set.parts.forEach((p) => (p.count = MOV)); });
   for (const [bx, bz, c] of [[-22, RZ + 79.6, 0xf2f2ee], [-38, RZ + 79.6, 0x2e7d4f]]) {
@@ -363,6 +365,7 @@ function surroundings(scene, assets = {}) {
 
   // ---- planting: three kinds of tree and clipped shrubs from Blender, each a little different in size and shade
   const leafMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
+  if (assets.leafTex) { leafMat.map = assets.leafTex; leafMat.alphaTest = 0.5; } // leaves are painted sprigs on cards
   const KINDS = assets.trees && assets.trees.length ? assets.trees : [new THREE.IcosahedronGeometry(2.6, 1).translate(0, 4, 0)];
   const BUSH = assets.bush || new THREE.IcosahedronGeometry(0.8, 1).translate(0, 0.5, 0);
   if (!assets.trees) leafMat.vertexColors = false, leafMat.color.set(0x4f7a3a);

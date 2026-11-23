@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { MapControls } from 'three/addons/controls/MapControls.js';
-import { preload, texture, dress, dressModel, setEnvironment, reflect } from './textures.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { preload, texture, dress, dressModel, setEnvironment, reflect, setAnisotropy } from './textures.js';
 import { addAmahoroSeats } from './tour-seats.js';
+import { makeGrass } from './tour-grass.js';
 
 const $ = (id) => document.getElementById(id);
 const V = '?v=' + __BUILD__;
@@ -14,6 +16,8 @@ const UP = new THREE.Vector3(0, 1, 0), deg = Math.PI / 180;
 const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 const coarse = matchMedia('(pointer: coarse)').matches;
 document.body.dataset.touch = coarse;
+// phones and small tablets get the light version of everything heavy; add ?lite=1 to the address to try it on a computer
+const lite = coarse || /[?&]lite=1/.test(location.search) || (navigator.deviceMemory || 8) < 4;
 const progress = (f) => { if (window.__loading) window.__loading(f); };
 
 // ---------------------------------------------------------------- the places
@@ -39,16 +43,29 @@ const VENUES = [
 
 // ---------------------------------------------------------------- scene
 const canvas = $('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, coarse ? 1.5 : 2));
+// On a phone the plain depth buffer is used (the logarithmic one switches off the graphics chip's early depth test,
+// which costs most where it hurts most); the camera's near plane then follows its height to keep the ground steady.
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !lite, logarithmicDepthBuffer: !lite, powerPreference: 'high-performance' });
+const DPR = Math.min(devicePixelRatio, lite ? 1.5 : 2); let dprScale = 1;
+renderer.setPixelRatio(DPR);
 renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
-renderer.shadowMap.enabled = !coarse; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !lite; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xcfdadc, 500, 3200);
 const camera = new THREE.PerspectiveCamera(46, 1, 0.3, 9000);
 camera.position.set(330, 300, -260);
 
-await preload((f) => progress(f * 0.45));
+// every download starts now, side by side, instead of one after the other
+const loader = new GLTFLoader(); loader.setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
+const soft = (p) => p.catch((e) => (e instanceof Error ? e : new Error(String(e))));
+const pending = {
+  city: soft(loader.loadAsync('/models/city.glb' + V)), world: soft(loader.loadAsync('/models/world.glb' + V)),
+  site: fetch('/tour/site.json' + V).then((r) => r.json()).catch(() => ({ trees: [], cars: [], lamps: [], traffic: [] })),
+  venues: Object.fromEntries(VENUES.filter((v) => v.file).map((v) => [v.id, soft(loader.loadAsync('/models/' + v.file + V))])),
+};
+// only the surfaces the tour uses; a phone skips the relief and shine maps
+setAnisotropy(lite ? 2 : 8);
+await preload((f) => progress(f * 0.4), { names: ['asphalt', 'paving', 'grass', 'concrete', 'metal', 'roof', 'plastic'], relief: !lite, only: ['sky.jpg', 'lattice_color.jpg'] });
 {
   const sky = texture('sky.jpg', { srgb: true });
   if (sky) { sky.mapping = THREE.EquirectangularReflectionMapping; scene.background = sky; const pm = new THREE.PMREMGenerator(renderer); setEnvironment(pm.fromEquirectangular(sky).texture); pm.dispose(); }
@@ -66,20 +83,21 @@ function aimSun(focus, span) { // keep the shadow map over the part of the site 
 // textures of the district (public/textures/tour, made by scripts/make_tour_textures.py)
 const tl = new THREE.TextureLoader();
 async function tex(file, { srgb = true, repeat = null } = {}) {
-  const t = await tl.loadAsync('/textures/tour/' + file + V); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.flipY = false;
+  const t = await tl.loadAsync('/textures/tour/' + file + V); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = lite ? 2 : 8; t.flipY = false;
   if (srgb) t.colorSpace = THREE.SRGBColorSpace; if (repeat) t.repeat.set(repeat[0], repeat[1]); return t;
 }
 const T = {};
 await Promise.all(Object.entries({ house: 'house.jpg', office: 'office.jpg', sheet: 'sheet.jpg', ground: 'ground.jpg', kerb: 'kerb.jpg', track: 'track.jpg',
   soccer: 'soccer.jpg', pitch5: 'pitch5.jpg', tennis: 'tennis.jpg', basket: 'basket.jpg', fence: 'fence.png' }).map(async ([k, f]) => { T[k] = await tex(f); }));
 T.sheetN = await tex('sheet_normal.jpg', { srgb: false });
-progress(0.55);
+progress(0.5);
 
 // UVs in metres straight from the ground position, so flat surfaces keep their texture at real size wherever they are
 function groundUV(geo) { const p = geo.attributes.position, uv = new Float32Array(p.count * 2); for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getX(i); uv[i * 2 + 1] = p.getZ(i); } geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); }
 const std = (o = {}) => new THREE.MeshStandardMaterial({ roughness: 0.95, side: THREE.DoubleSide, ...o });
 // break up the visible repeat of a tiled texture by mixing it with two larger, turned copies of itself
 function untile(m) {
+  if (lite) return m; // three texture reads per pixel of ground is too dear on a phone
   m.onBeforeCompile = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `
     #ifdef USE_MAP
       vec4 tA = texture2D(map, vMapUv);
@@ -103,10 +121,10 @@ const lift = (m, n) => { m.polygonOffset = true; m.polygonOffsetFactor = -n; m.p
 }
 
 { // beyond the mapped streets the city carries on: simple houses and trees, only ever seen from far away
-  let r = 91; const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647), o = new THREE.Object3D(), c = new THREE.Color(), N = coarse ? 1400 : 3200;
+  let r = 91; const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647), o = new THREE.Object3D(), c = new THREE.Color(), N = lite ? 1100 : 3200;
   const wallsI = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0), std({ side: THREE.FrontSide }), N);
   const roofsI = new THREE.InstancedMesh(new THREE.ConeGeometry(0.76, 1, 4).rotateY(Math.PI / 4).translate(0, 0.5, 0), std({ side: THREE.FrontSide, roughness: 0.6, flatShading: true }), N);
-  const treesI = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1).translate(0, 1.6, 0), std({ side: THREE.FrontSide, flatShading: true }), N);
+  const treesI = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, lite ? 0 : 1).translate(0, 1.6, 0), std({ side: THREE.FrontSide, flatShading: true }), N);
   const ROOF = [0x9a4a35, 0xa5533a, 0x8c4433, 0xb05e44, 0x6f7f96, 0x8f9499, 0x9a4a35], WALL = [0xe9dfc8, 0xe4d3b0, 0xd9c7a3, 0xdcd6c8];
   let n = 0, guard = 0;
   while (n < N && guard++ < 60000) {
@@ -122,12 +140,13 @@ const lift = (m, n) => { m.polygonOffset = true; m.polygonOffsetFactor = -n; m.p
   [wallsI, roofsI, treesI].forEach((m) => { m.count = n; m.frustumCulled = false; scene.add(m); });
 }
 
-const loader = new GLTFLoader(); loader.setDRACOLoader(new DRACOLoader().setDecoderPath('/draco/'));
-const shade = (root, cast = true) => root.traverse((o) => { if (o.isMesh) { o.castShadow = cast; o.receiveShadow = true; } });
+const shade = (root, cast = true) => root.traverse((o) => { if (o.isMesh) { o.castShadow = cast; o.receiveShadow = !lite; } });
 
 // ---------------------------------------------------------------- the district
+const GRASS = { C_Lawn: 1, C_Turf: 0.7, C_Soccer: 0.7, C_Pitch5: 0.7 }; // where blades of grass grow, and how long (1 = lawn, 0.7 = pitch)
+const grass = makeGrass({ renderer, scene, lite });
 try {
-  const g = await loader.loadAsync('/models/city.glb' + V);
+  const g = await pending.city; if (g instanceof Error) throw g;
   const flatUV = new Set(['C_Road', 'C_Parking', 'C_Sidewalk', 'C_Paving', 'C_PavingB', 'C_Path', 'C_Lawn', 'C_Turf', 'C_RoofFlat']);
   const MAT = {
     C_Road: () => lift(untile(dress(std({ color: 0x84878a }), 'asphalt')), 3),
@@ -154,76 +173,116 @@ try {
     if (!o.isMesh) return;
     const name = o.material.name; if (flatUV.has(name)) groundUV(o.geometry);
     if (MAT[name]) o.material = MAT[name]();
-    o.receiveShadow = true; o.castShadow = ['C_House', 'C_Office', 'C_Sheet', 'C_RoofFlat', 'C_Fence'].includes(name);
+    if (GRASS[name]) o.userData.grass = GRASS[name];
+    o.receiveShadow = !lite; o.castShadow = !lite && ['C_House', 'C_Office', 'C_Sheet', 'C_RoofFlat', 'C_Fence'].includes(name);
   });
   scene.add(g.scene);
 } catch (err) { console.error('district not loaded:', err); }
-progress(0.68);
+const site = await pending.site;
+progress(0.9);
 
 // ---------------------------------------------------------------- the venues
 const venueRoots = {};
-let step = 0;
-await Promise.all(VENUES.filter((v) => v.file).map(async (v) => {
-  try {
-    const g = await loader.loadAsync('/models/' + v.file + V), root = g.scene;
-    root.traverse((o) => {
-      if (!o.isMesh) return;
-      const m = o.material, n = m.name || '';
-      if (v.id === 'bk') {
-        m.side = THREE.DoubleSide;
-        if (n === 'E_Lattice') { const t = texture('lattice_color.jpg', { srgb: true }); if (t) { t.flipY = false; m.map = t; m.emissiveMap = t; m.emissive.set(0xffffff); m.emissiveIntensity = 0.25; } }
-        if (n === 'E_Glass' || n === 'E_GlassDark' || n === 'E_Door') { m.metalness = 0.9; m.roughness = 0.08; reflect(m, 1.3); }
-      } else if (/glass|glaz|window|water|pool/i.test(n) || m.metalness > 0.5) reflect(m, 1.1);
-      else reflect(m, 0.25);
-      if (n === 'Kerb') { m.map = null; m.color.set(0xb4ada0); } // plaza edges are plain stone; only street kerbs are painted black and white
-      if (m.map) m.map.anisotropy = 8;
-      if (m.transparent) { m.depthWrite = false; o.renderOrder = 3; }
-    });
-    if (v.id === 'bk') dressModel(root, 1);
-    shade(root); root.position.set(v.pos[0], v.id === 'bk' ? 0 : 0.13, v.pos[1]); root.rotation.y = v.rot; scene.add(root); venueRoots[v.id] = root;
-  } catch (err) { console.warn(v.name + ' model not loaded:', err.message); }
-  progress(0.68 + ++step * 0.06);
-}));
-
 let seats = null;
-if (venueRoots.amahoro) seats = await addAmahoroSeats({ THREE, scene, root: venueRoots.amahoro, loader, V, coarse }).catch((e) => (console.warn('stadium seats not loaded:', e), null));
+// The venues arrive in the background: the tour opens as soon as the district is there, and each one appears when it is ready.
+for (const v of VENUES.filter((q) => q.file)) pending.venues[v.id].then(async (g) => {
+  if (g instanceof Error) throw g;
+  const root = g.scene;
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = o.material, n = m.name || '';
+    if (v.id === 'bk') {
+      m.side = THREE.DoubleSide;
+      if (n === 'E_Lattice') { const t = texture('lattice_color.jpg', { srgb: true }); if (t) { t.flipY = false; m.map = t; m.emissiveMap = t; m.emissive.set(0xffffff); m.emissiveIntensity = 0.25; } }
+      if (n === 'E_Glass' || n === 'E_GlassDark' || n === 'E_Door') { m.metalness = 0.9; m.roughness = 0.08; reflect(m, 1.3); }
+    } else if (/glass|glaz|window|water|pool/i.test(n) || m.metalness > 0.5) reflect(m, 1.1);
+    else if (!lite) reflect(m, 0.25);
+    if (n === 'Kerb') { m.map = null; m.color.set(0xb4ada0); } // plaza edges are plain stone; only street kerbs are painted black and white
+    if (/^(lawn|grass)$/i.test(n)) o.userData.grass = 1; else if (/^(pitch5?|turf)$/i.test(n)) o.userData.grass = 0.7;
+    if (m.map) m.map.anisotropy = lite ? 2 : 8;
+    if (m.transparent) { m.depthWrite = false; o.renderOrder = 3; }
+  });
+  if (v.id === 'bk') dressModel(root, 1);
+  shade(root, !lite); root.position.set(v.pos[0], v.id === 'bk' ? 0 : 0.13, v.pos[1]); root.rotation.y = v.rot; scene.add(root); venueRoots[v.id] = root;
+  grass.refreshSoon();
+  if (v.id === 'amahoro') seats = await addAmahoroSeats({ THREE, scene, root, loader, V, coarse: lite });
+}).catch((err) => console.warn(v.name + ' not loaded:', err.message));
 
 // ---------------------------------------------------------------- trees, parked cars, street lamps, traffic
-const site = await fetch('/tour/site.json' + V).then((r) => r.json()).catch(() => ({ trees: [], cars: [], lamps: [], traffic: [] }));
 const o3 = new THREE.Object3D(), col = new THREE.Color();
 const PAINT = [0xf2f2f2, 0xd9d9d6, 0x1b1b1d, 0x8b8f96, 0x8f1a1a, 0x1d3f7a, 0xc9c2b2, 0x2b2d31];
 let drivers = [];
-try {
-  const g = await loader.loadAsync('/models/world.glb' + V), geo = (n) => { const o = g.scene.getObjectByName(n); return o && o.geometry; };
-  const leaf = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
-  ['Tree1', 'Tree2', 'Tree3'].map(geo).forEach((tg, k) => {
-    const list = site.trees.filter((t) => t[4] === k); if (!tg || !list.length) return;
-    const m = new THREE.InstancedMesh(tg, leaf, list.length); m.castShadow = true; m.receiveShadow = true;
-    list.forEach(([x, z, s, r], i) => { o3.position.set(x, 0, z); o3.rotation.set(0, r, 0); o3.scale.set(s, s * (0.9 + (i % 7) * 0.04), s); o3.updateMatrix(); m.setMatrixAt(i, o3.matrix);
-      m.setColorAt(i, col.setHSL(0.27, 0.0, 0.78 + (i % 5) * 0.05)); });
-    scene.add(m);
+// Many copies of one model, sorted into squares of ground. A square draws the full model while the camera is near it
+// and the light version from further off, and squares out of view are not drawn at all.
+const fields = [];
+function lodField(items, hi, lo, { cell = 170, near = 160, far = Infinity, cast = true } = {}) {
+  const squares = new Map();
+  for (const it of items) { const k = Math.floor(it.x / cell) + ',' + Math.floor(it.z / cell); if (!squares.has(k)) squares.set(k, []); squares.get(k).push(it); }
+  for (const list of squares.values()) {
+    const build = (parts, shadow) => parts.map(([geo, mat, tint]) => {
+      const m = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((it, i) => { o3.position.set(it.x, it.y || 0, it.z); o3.rotation.set(0, it.ry, 0); o3.scale.set(it.s, it.sy || it.s, it.s); o3.updateMatrix(); m.setMatrixAt(i, o3.matrix); if (tint) m.setColorAt(i, it.color); });
+      m.castShadow = shadow; m.receiveShadow = !lite; m.computeBoundingSphere(); m.visible = false; scene.add(m); return m;
+    });
+    const x = list.reduce((s, it) => s + it.x, 0) / list.length, z = list.reduce((s, it) => s + it.z, 0) / list.length;
+    fields.push({ x, z, near, far, H: build(hi, cast && !lite), L: lo ? build(lo, false) : null, state: -1 });
+  }
+}
+function updateFields() {
+  const p = camera.position;
+  for (const f of fields) {
+    const d = Math.hypot(p.x - f.x, p.y, p.z - f.z), s = d > f.far ? 2 : !f.L || d < f.near * (f.state === 1 ? 1.15 : 1) ? 1 : 0; // 1 = full, 0 = light, 2 = too far to matter
+    if (s !== f.state) { f.state = s; for (const m of f.H) m.visible = s === 1; if (f.L) for (const m of f.L) m.visible = s === 0; }
+  }
+}
+pending.world.then((g) => {
+  if (g instanceof Error) throw g;
+  const geo = (n) => { const o = g.scene.getObjectByName(n); return o && o.geometry; };
+  // trees
+  const leaf = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide, alphaTest: 0.5 });
+  tl.loadAsync('/textures/tour/leaves.webp' + V).then((tx) => { tx.flipY = false; tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = lite ? 2 : 4; leaf.map = tx; leaf.needsUpdate = true; });
+  [1, 2, 3].forEach((n, k) => {
+    const full = geo('Tree' + n), light = geo(`Tree${n}L`); if (!full) return;
+    const list = site.trees.filter((t, i) => t[4] === k && !(lite && i % 4 === 3)).map(([x, z, s, r], i) => ({ x, z, ry: r, s, sy: s * (0.9 + (i % 7) * 0.04), color: new THREE.Color().setHSL(0.27, 0, 0.78 + (i % 5) * 0.05) }));
+    lodField(list, [[full, leaf, true]], light ? [[light, leaf, true]] : null, { cell: lite ? 400 : 170, near: lite ? 60 : 170 });
   });
-  const paintMat = reflect(new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.55 }), 0.8), glassMat = reflect(new THREE.MeshStandardMaterial({ color: 0x141c20, roughness: 0.06, metalness: 0.7 }), 1.2);
-  const trimMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.7 }), lightMat = new THREE.MeshBasicMaterial({ color: 0xf6f3e6 });
-  const MOVING = coarse ? 24 : 54;
+  // cars
+  const paintMat = reflect(new THREE.MeshStandardMaterial({ roughness: 0.28, metalness: 0.6 }), 0.9), glassMat = reflect(new THREE.MeshStandardMaterial({ color: 0x141c20, roughness: 0.06, metalness: 0.7 }), 1.2);
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x0c0d0e, roughness: 0.75 }), lightMat = new THREE.MeshBasicMaterial({ color: 0xf6f3e6 });
+  const rimMat = reflect(new THREE.MeshStandardMaterial({ color: 0xc4c8cc, roughness: 0.3, metalness: 0.9 }), 0.8), tailMat = new THREE.MeshStandardMaterial({ color: 0x8f0f12, roughness: 0.4, emissive: 0x5a0507 });
+  const MATS = { Body: paintMat, Glass: glassMat, Trim: trimMat, Lights: lightMat, Rim: rimMat, Tail: tailMat };
+  const partsOf = (prefix) => Object.entries(MATS).filter(([p]) => geo(`${prefix}_${p}`)).map(([p, m]) => [geo(`${prefix}_${p}`), m, p === 'Body']);
+  // the light car is drawn in two pieces only: the painted body, and everything else fused into one with its colours baked in
+  const flatMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 });
+  const fuse = (parts) => {
+    const body = parts.find((p) => p[2]), rest = parts.filter((p) => !p[2]).map(([gm, mat]) => {
+      const c = gm.clone(); for (const k of Object.keys(c.attributes)) if (k !== 'position' && k !== 'normal') c.deleteAttribute(k);
+      const n = c.attributes.position.count, cols = new Float32Array(n * 3), k = mat.color; for (let i = 0; i < n; i++) cols.set([k.r, k.g, k.b], i * 3);
+      c.setAttribute('color', new THREE.BufferAttribute(cols, 3)); return c.index ? c.toNonIndexed() : c;
+    });
+    const out = body ? [body] : []; if (rest.length) out.push([mergeGeometries(rest), flatMat, false]); return out;
+  };
+  const MOVING = lite ? 18 : 54;
   const fleets = [1, 2, 3].map((n, k) => {
-    const parked = site.cars.filter((c) => c[3] === k), count = parked.length + MOVING / 3;
-    const parts = [[`Car${n}_Body`, paintMat], [`Car${n}_Glass`, glassMat], [`Car${n}_Trim`, trimMat], [`Car${n}_Lights`, lightMat]].filter(([nm]) => geo(nm)).map(([nm, mat]) => new THREE.InstancedMesh(geo(nm), mat, count));
-    parts.forEach((p) => { p.castShadow = true; p.frustumCulled = false; scene.add(p); });
+    const full = partsOf('Car' + n), light = fuse(partsOf(`Car${n}L`));
+    const parked = site.cars.filter((c) => c[3] === k).map(([x, z, ry, , c]) => ({ x, y: 0.07, z, ry, s: 1, color: new THREE.Color(PAINT[c]) }));
+    lodField(parked, full, light.length ? light : null, { cell: lite ? 300 : 120, near: lite ? 40 : 65, far: lite ? 520 : Infinity });
+    // the ones that drive: a few of each kind, always the light version on a phone
+    const parts = (lite && light.length ? light : full).map(([gm, mat]) => { const m = new THREE.InstancedMesh(gm, mat, MOVING / 3); m.castShadow = !lite; m.frustumCulled = false; scene.add(m); return m; });
     const put = (i, x, z, ry) => { o3.position.set(x, 0.07, z); o3.rotation.set(0, ry, 0); o3.scale.setScalar(1); o3.updateMatrix(); parts.forEach((p) => p.setMatrixAt(i, o3.matrix)); };
-    parked.forEach(([x, z, ry, , c], i) => { put(i, x, z, ry); parts[0].setColorAt(i, col.setHex(PAINT[c])); });
-    return { parts, put, base: parked.length };
+    return { parts, put };
   });
   // traffic: cars follow the main roads, keeping to the right
   const paths = site.traffic.map((t) => { const p = t.pts.map(([x, z]) => new THREE.Vector2(x, z)), cum = [0]; for (let i = 1; i < p.length; i++) cum.push(cum[i - 1] + p[i].distanceTo(p[i - 1])); return { p, cum, len: cum[cum.length - 1], w: t.w, oneway: t.oneway }; }).filter((t) => t.len > 120);
   const total = paths.reduce((s, t) => s + t.len, 0); let seed = 3; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < MOVING && paths.length; i++) {
     let pick = rnd() * total, path = paths[0]; for (const t of paths) { if ((pick -= t.len) <= 0) { path = t; break; } }
-    const f = fleets[i % 3], slot = f.base + Math.floor(i / 3); f.parts[0].setColorAt(slot, col.setHex(PAINT[i % PAINT.length]));
+    const f = fleets[i % 3], slot = Math.floor(i / 3); if (f.parts[0]) f.parts[0].setColorAt(slot, col.setHex(PAINT[i % PAINT.length]));
     drivers.push({ f, slot, path, s: rnd() * path.len, dir: path.oneway || rnd() < 0.5 ? 1 : -1, speed: 8 + rnd() * 6 });
   }
-  fleets.forEach((f) => f.parts.forEach((p) => { p.instanceMatrix.needsUpdate = true; if (p.instanceColor) p.instanceColor.needsUpdate = true; }));
-} catch (err) { console.warn('trees and cars not loaded:', err.message); }
+  fleets.forEach((f) => f.parts.forEach((p) => { if (p.instanceColor) p.instanceColor.needsUpdate = true; }));
+  updateFields();
+}).catch((err) => console.warn('trees and cars not loaded:', err.message));
 function drive(dt) {
   for (const d of drivers) {
     d.s += d.speed * dt * d.dir; if (d.s > d.path.len) d.s -= d.path.len; if (d.s < 0) d.s += d.path.len;
@@ -232,17 +291,17 @@ function drive(dt) {
     const off = d.path.oneway ? 0 : d.path.w / 4; // to the right of the direction of travel
     d.f.put(d.slot, a.x + (b.x - a.x) * k - dz / l * off, a.y + (b.y - a.y) * k + dx / l * off, Math.atan2(dx, dz));
   }
-  const seen = new Set(drivers.map((d) => d.f)); seen.forEach((f) => f.parts.forEach((p) => (p.instanceMatrix.needsUpdate = true)));
+  const seen = new Set(drivers.map((d) => d.f)); seen.forEach((f) => f.parts.forEach((p) => { p.instanceMatrix.needsUpdate = true; }));
 }
 { // street lamps
   const n = site.lamps.length; if (n) {
     const pole = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.08, 0.12, 9, 8).translate(0, 4.5, 0), dress(new THREE.MeshStandardMaterial({ color: 0x8c9296, metalness: 0.6, roughness: 0.5 }), 'metal'), n);
     const head = new THREE.InstancedMesh(new THREE.BoxGeometry(0.34, 0.12, 1.5).translate(0, 9, 0.7), new THREE.MeshStandardMaterial({ color: 0x9a9fa3, metalness: 0.5, roughness: 0.5 }), n);
     site.lamps.forEach(([x, z, ry], i) => { o3.position.set(x, 0, z); o3.rotation.set(0, ry, 0); o3.scale.setScalar(1); o3.updateMatrix(); pole.setMatrixAt(i, o3.matrix); head.setMatrixAt(i, o3.matrix); });
-    pole.castShadow = true; scene.add(pole, head);
+    pole.castShadow = !lite; scene.add(pole, head);
   }
 }
-progress(0.97);
+grass.refresh();
 
 // ---------------------------------------------------------------- moving about
 const controls = new MapControls(camera, canvas);
@@ -541,10 +600,18 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener('resize', resize); resize();
 setMode('fly'); controls.autoRotate = true; controls.update();
 if (location.hash === '#explore') startGame();
-let last = performance.now(), slow = 0;
+let last = performance.now(), slow = 0, tick = 0, spent = 0, frames = 0;
+// Keep the picture moving: if frames come slowly the picture is drawn a little coarser, and sharpened again when there is time to spare.
+function pace(raw) {
+  if (raw > 0.25 || tween) return; spent += raw; frames++;
+  if (spent < 1) return;
+  const ms = spent / frames * 1000, was = dprScale; spent = frames = 0;
+  if (ms > 27 && dprScale > 0.55) dprScale = Math.max(0.55, dprScale - 0.12); else if (ms < 18.5 && dprScale < 1) dprScale = Math.min(1, dprScale + 0.06);
+  if (dprScale !== was) renderer.setPixelRatio(DPR * dprScale);
+}
 const focus = new THREE.Vector3();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const raw = (now - last) / 1000, dt = Math.min(0.05, raw); last = now; pace(raw);
   pollPad(); readInput();
   if (tween) {
     const k = Math.min(1, (now - tween.t0) / tween.ms), e = ease(k);
@@ -553,11 +620,16 @@ function frame(now) {
   } else if (mode === 'walk') stepWalk(dt);
   else { if (!menu) stepFly(dt); controls.update(); }
   drive(dt); play(dt, now);
-  if ((slow += dt) > 0.2) { slow = 0; lookForOffer(); }
+  if ((slow += dt) > 0.2) { slow = 0; lookForOffer(); updateFields(); }
   if (mode === 'walk') { focus.copy(camera.position); focus.y = 0; aimSun(focus, 150); }
   else { focus.copy(tween ? tween.look : controls.target); aimSun(focus, Math.max(160, Math.min(520, camera.position.distanceTo(focus) * 0.7))); }
   if (seats) seats.update(camera);
-  placeTags(); if (!menu) drawMap();
+  grass.update(camera, now / 1000, mode === 'walk' ? camera.position.y - EYE : 0);
+  if (lite) { // near plane: close when walking, further out the higher the camera flies
+    const near = mode === 'walk' && !tween ? 0.35 : Math.max(0.5, Math.min(30, camera.position.y * 0.04));
+    if (Math.abs(near - camera.near) > camera.near * 0.15) { camera.near = near; camera.updateProjectionMatrix(); }
+  }
+  placeTags(); if (!menu && (++tick % 3 === 0 || !lite)) drawMap();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
